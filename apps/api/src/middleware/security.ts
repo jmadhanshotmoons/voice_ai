@@ -21,12 +21,17 @@ import { log } from "../lib/log";
 
 // ── Allowed browser origins ──
 
-/** FRONTEND_URL may hold several comma-separated origins (e.g. app + custom domain). */
+// Our own production site is always allowed, so a missing or stale FRONTEND_URL can never lock real users out.
+const PRODUCTION_ORIGINS = ["https://batkarai.jmadhan.me"];
+
+/** FRONTEND_URL may hold several comma-separated origins (e.g. a staging site). They are added to the production origins. */
 export function allowedOrigins(): string[] {
-  return (process.env.FRONTEND_URL || "http://localhost:3000")
+  const fromEnv = (process.env.FRONTEND_URL || "")
     .split(",")
     .map((o) => o.trim().replace(/\/$/, ""))
     .filter(Boolean);
+  const local = process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000", "http://localhost:3001"];
+  return Array.from(new Set([...PRODUCTION_ORIGINS, ...fromEnv, ...local]));
 }
 
 // Server-to-server callers (phone providers, lead webhooks) are authenticated by signature/API key, not by origin.

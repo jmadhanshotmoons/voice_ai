@@ -30,7 +30,12 @@ async def lifespan(app: FastAPI):
 # No public API docs / schema: nothing to enumerate
 app = FastAPI(title="Batkarai Pipeline Server", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
-ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_URL", "http://localhost:3001").split(",") if o.strip()]
+# Our own production site is always allowed, so a missing or stale FRONTEND_URL can never lock real users out.
+PRODUCTION_ORIGINS = ["https://batkarai.jmadhan.me"]
+ALLOWED_ORIGINS = list(dict.fromkeys(
+    PRODUCTION_ORIGINS
+    + [o.strip().rstrip("/") for o in os.getenv("FRONTEND_URL", "http://localhost:3001").split(",") if o.strip()]
+))
 
 
 @app.middleware("http")
