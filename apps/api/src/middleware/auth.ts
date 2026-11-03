@@ -11,6 +11,7 @@
 
 import { Request, Response, NextFunction } from "express";
 import { createClient } from "@supabase/supabase-js";
+import { log } from "../lib/log";
 
 const supabase = createClient(
   process.env.SUPABASE_URL || "",
@@ -23,6 +24,7 @@ declare global {
     interface Request {
       accountId?: string;
       authUserId?: string;
+      authEmail?: string;
       isAdmin?: boolean;
     }
   }
@@ -48,6 +50,7 @@ export async function requireAuth(
     } = await supabase.auth.getUser(token);
 
     if (error || !user) {
+      log.warn("auth_failed", { ip: req.ip, reason: "bad_token" });
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
@@ -65,6 +68,7 @@ export async function requireAuth(
     // Inject into request -- downstream routes use ONLY these, never req.body.account_id
     req.accountId = account.id;
     req.authUserId = user.id;
+    req.authEmail = user.email;
     req.isAdmin = account.is_admin;
 
     next();
@@ -95,7 +99,7 @@ export async function requireApiKey(
   next: NextFunction
 ) {
   const apiKey = req.headers["x-api-key"] as string;
-  if (!apiKey) {
+  if (!apiKey || typeof apiKey !== "string" || apiKey.length > 200) {
     return res.status(401).json({ error: "Missing X-API-Key header" });
   }
 
@@ -110,6 +114,7 @@ export async function requireApiKey(
     .single();
 
   if (!keyRecord) {
+    log.warn("auth_failed", { ip: req.ip, reason: "bad_api_key" });
     return res.status(401).json({ error: "Invalid API key" });
   }
 

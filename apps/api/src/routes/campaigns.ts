@@ -29,7 +29,7 @@ const createCampaignSchema = z.object({
   contacts: z.array(z.object({
     phone_number: z.string().min(10).max(15),
     name: z.string().max(200).default(""),
-    custom_fields: z.record(z.string()).default({}),
+    custom_fields: z.record(z.string(), z.string()).default({}),
   })).min(1).max(10000),
 });
 

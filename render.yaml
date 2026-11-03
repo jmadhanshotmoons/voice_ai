@@ -3,8 +3,8 @@
 # variable marked "sync: false" (secrets are never stored in git).
 #
 # Region: singapore is Render's closest region to India.
-# Plan: "starter" keeps the services always on. Free web services sleep after
-# 15 minutes idle, which would drop incoming phone calls.
+# Plan: free for testing. Free services sleep after 15 minutes idle (first request then takes ~1 min),
+# which would drop incoming phone calls. Switch to "starter" before real use.
 
 envVarGroups:
   - name: voiceai-shared
@@ -20,7 +20,7 @@ services:
     dockerfilePath: ./apps/api/Dockerfile
     dockerContext: ./apps/api
     region: singapore
-    plan: starter
+    plan: free
     healthCheckPath: /health
     envVars:
       - fromGroup: voiceai-shared
@@ -65,7 +65,7 @@ services:
     dockerfilePath: ./apps/voice-server/Dockerfile
     dockerContext: ./apps/voice-server
     region: singapore
-    plan: starter
+    plan: free
     healthCheckPath: /health
     envVars:
       - fromGroup: voiceai-shared
@@ -93,5 +93,5 @@ services:
   - type: keyvalue
     name: voiceai-redis
     region: singapore
-    plan: starter
+    plan: free
     ipAllowList: []          # internal connections only

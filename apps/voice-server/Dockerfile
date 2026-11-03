@@ -20,4 +20,4 @@ USER appuser
 
 EXPOSE 8765
 
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8765", "--ws-ping-interval", "30", "--ws-ping-timeout", "30"]
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8765", "--ws-ping-interval", "30", "--ws-ping-timeout", "30", "--no-server-header"]

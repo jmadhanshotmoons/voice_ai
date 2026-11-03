@@ -13,6 +13,8 @@ import { z } from "zod";
 import rateLimit from "express-rate-limit";
 import { validate } from "../middleware/validate";
 import { placeCall, normalizePhone, allowedPrefixes, provider } from "../lib/telephony";
+import { signTicket } from "../lib/ticket";
+import { log } from "../lib/log";
 
 const router = Router();
 const supabase = createClient(
@@ -98,9 +100,25 @@ router.post("/outbound", outboundLimiter, validate(outboundSchema), async (req: 
     res.status(201).json({ call_id: call.id, status: "ringing", provider: placed.provider });
   } catch (err: any) {
     await supabase.from("calls").update({ status: "failed" }).eq("id", call.id);
-    console.error("Outbound call failed:", err.message);
+    log.error("outbound_call_failed", { error: err.message });
     res.status(502).json({ error: err.message || "The phone provider rejected the call" });
   }
+});
+
+// POST /api/v1/calls/web-ticket -- short-lived ticket to open a browser test call to the voice server
+const webTicketSchema = z.object({ employee_id: z.string().uuid() });
+
+router.post("/web-ticket", outboundLimiter, validate(webTicketSchema), async (req: Request, res: Response) => {
+  // Employee must belong to this account (IDOR protection)
+  const { data: employee } = await supabase
+    .from("employees")
+    .select("id")
+    .eq("id", req.body.employee_id)
+    .eq("account_id", req.accountId!)
+    .single();
+  if (!employee) return res.status(404).json({ error: "Employee not found" });
+  if (!process.env.WEBHOOK_SECRET) return res.status(503).json({ error: "Calling is not configured" });
+  res.json({ ticket: signTicket(`test-${employee.id}`) });
 });
 
 // GET /api/v1/calls -- list calls with pagination

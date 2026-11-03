@@ -6,7 +6,7 @@ import re
 import structlog
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.pipeline.session import CallSession
@@ -27,20 +27,39 @@ async def lifespan(app: FastAPI):
     logger.info("voice_server_stopping")
 
 
-app = FastAPI(title="VoiceAI Pipeline Server", lifespan=lifespan)
+# No public API docs / schema: nothing to enumerate
+app = FastAPI(title="VoiceAI Pipeline Server", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_URL", "http://localhost:3001").split(",") if o.strip()]
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    response.headers["Cache-Control"] = "no-store"
+    if "server" in response.headers:
+        del response.headers["server"]
+    return response
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o for o in [os.getenv("FRONTEND_URL", "http://localhost:3001")] if o],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET"],
+    allow_headers=["Content-Type"],
+    max_age=600,
 )
 
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "service": "voice-pipeline"}
+    return {"status": "ok"}
 
 
 # In-memory agent configs for MVP. Replace with DB lookup in production.
@@ -81,7 +100,18 @@ async def run_call(transport, call_id: str, agent: AgentConfig, account_id: str 
 
 @app.websocket("/call/{call_id}")
 async def voice_call_ws(ws: WebSocket, call_id: str):
-    """Browser calls. "test-<employee id>" is a dashboard Test Call."""
+    """Browser calls. "test-<employee id>" is a dashboard Test Call and needs a ticket from the API."""
+    # Browsers always send Origin on WebSockets: only our own frontend may connect.
+    origin = ws.headers.get("origin")
+    if origin and origin.rstrip("/") not in ALLOWED_ORIGINS:
+        logger.warning("ws_origin_rejected", origin=origin)
+        await ws.close(code=1008)
+        return
+    # Only real dashboard test calls are served; the anonymous demo agent is not reachable from the internet.
+    if not TEST_CALL_ID.match(call_id) or not calls_db.valid_ticket(call_id, ws.query_params.get("ticket")):
+        logger.warning("ws_ticket_rejected", call_id=call_id)
+        await ws.close(code=1008)
+        return
     await ws.accept()
     logger.info("call_connected", call_id=call_id)
 

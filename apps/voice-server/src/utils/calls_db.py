@@ -7,6 +7,7 @@ status callback then only fills in what the provider alone knows.
 
 import hashlib
 import hmac
+import time
 import os
 import re
 from datetime import datetime, timezone
@@ -53,6 +54,18 @@ def valid_call_token(call_id: str, token: Optional[str]) -> bool:
     if not os.getenv("WEBHOOK_SECRET") or not token:
         return False
     return hmac.compare_digest(sign_call(call_id), token)
+
+
+def valid_ticket(subject: str, ticket: Optional[str]) -> bool:
+    """Short-lived ticket minted by the API (apps/api/src/lib/ticket.ts) for a browser call."""
+    secret = os.getenv("WEBHOOK_SECRET", "")
+    if not secret or not ticket or "." not in ticket:
+        return False
+    exp_s, _, sig = ticket.partition(".")
+    if not exp_s.isdigit() or int(exp_s) < time.time():
+        return False
+    want = hmac.new(secret.encode(), f"ticket:{subject}:{exp_s}".encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(want, sig)
 
 
 def agent_from_employee(emp: dict) -> AgentConfig:
