@@ -92,6 +92,7 @@ Every POST/PATCH request body is validated with Zod schemas that:
 | CSRF | Auth is a bearer token (no cookie to ride), plus `Origin` verification on every browser write. |
 | Auth | Sign-up needs 12+ characters and is checked against Have I Been Pwned (k-anonymity). Supabase config: min length 12, upper+lower+digits, 15-min access tokens, refresh-token rotation, TOTP MFA on, 24h timebox, 30-min inactivity. Passwords are hashed by Supabase (bcrypt). Sign-in failures return the same generic message. |
 | Sensitive actions | Account deletion re-checks the password and requires typing `DELETE`. |
+| API keys and lead webhook | Keys (`bk_` + 256 random bits) are shown once and stored only as a SHA-256 hash; revocable. The lead webhook now rejects anonymous posts: it needs a valid `X-Lead-Secret` HMAC or an `X-API-Key` of the same account. |
 | Voice server | Browser calls need a 60-second HMAC ticket minted by the authenticated API for an employee the caller owns. The anonymous demo agent is no longer reachable. API docs/OpenAPI disabled. |
 | API | Auth on every route except health, signed phone webhooks, API-key lead intake. Per-account scoping on every query (IDOR). Zod validation, 1 MB body limit, paginated lists with caps, parameterised queries only (Supabase client), method allow-list (no TRACE), `/health` returns `{"status":"ok"}` only. |
 | Errors and logs | Generic errors to clients. One JSON log line per request (time, IP, user, status, path only; secrets, tokens, emails, phone numbers redacted). Auth failures and denied access logged as warnings. |

@@ -15,6 +15,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { validate } from "../middleware/validate";
 import { leadIntakeLimiter } from "../middleware/security";
+import { log } from "../lib/log";
 
 const router = Router();
 const supabase = createClient(
@@ -50,17 +51,35 @@ router.post("/:slug", leadIntakeLimiter, validate(leadSchema), async (req: Reque
     return res.status(400).json({ error: "Agent is not active" });
   }
 
-  // Verify HMAC signature if secret header is present
-  const signature = req.headers["x-lead-secret"] as string;
-  if (signature) {
-    const expected = crypto
-      .createHmac("sha256", employee.webhook_secret)
-      .update(JSON.stringify(req.body))
-      .digest("hex");
+  // Every request must prove it may add leads for this agent: a valid HMAC signature
+  // (X-Lead-Secret) or an API key of the same account (X-API-Key). Anonymous posts are rejected.
+  let authorised = false;
+  const signature = req.headers["x-lead-secret"];
+  const apiKey = req.headers["x-api-key"];
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-      return res.status(401).json({ error: "Invalid signature" });
+  if (typeof signature === "string") {
+    const expected = crypto.createHmac("sha256", employee.webhook_secret).update(JSON.stringify(req.body)).digest("hex");
+    const a = Buffer.from(signature);
+    const b = Buffer.from(expected);
+    authorised = a.length === b.length && crypto.timingSafeEqual(a, b);
+  } else if (typeof apiKey === "string" && apiKey.length <= 200) {
+    const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
+    const { data: keyRecord } = await supabase
+      .from("api_keys")
+      .select("id")
+      .eq("key_hash", keyHash)
+      .eq("account_id", employee.account_id)
+      .eq("is_active", true)
+      .single();
+    authorised = !!keyRecord;
+    if (keyRecord) {
+      supabase.from("api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", keyRecord.id).then();
     }
+  }
+
+  if (!authorised) {
+    log.warn("lead_intake_rejected", { ip: req.ip, slug });
+    return res.status(401).json({ error: "Missing or invalid credentials" });
   }
 
   // Check account has credits
@@ -96,7 +115,7 @@ router.post("/:slug", leadIntakeLimiter, validate(leadSchema), async (req: Reque
   res.status(202).json({
     status: "accepted",
     lead_id: lead?.id,
-    message: "Lead received. Call will be initiated shortly.",
+    message: "Lead received.",
   });
 });
 

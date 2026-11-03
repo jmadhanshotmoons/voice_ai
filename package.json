@@ -1,5 +1,5 @@
 {
-  "name": "voiceai-platform",
+  "name": "batkarai-platform",
   "private": true,
   "scripts": {
     "dev": "echo 'Run each app separately - see README.md'",

@@ -101,7 +101,7 @@ async def fire_webhook(
                 headers={
                     "Content-Type": "application/json",
                     "X-Signature": signature,
-                    "User-Agent": "VoiceAI-Webhook/1.0",
+                    "User-Agent": "Batkarai-Webhook/1.0",
                 },
             )
 

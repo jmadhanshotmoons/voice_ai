@@ -1,4 +1,4 @@
-# VoiceAI -- AI Calling Platform
+# Batkarai -- AI Calling Platform
 
 AI employees that make your business calls in 7 Indian languages.
 

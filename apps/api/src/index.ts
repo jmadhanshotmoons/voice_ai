@@ -76,7 +76,7 @@ app.get("/health", (_req, res) => {
 app.get("/.well-known/security.txt", (_req, res) => {
   res.type("text/plain").send(
     [
-      "Contact: mailto:jmadhan.shotmoons@gmail.com",
+      "Contact: mailto:hello@jmadhan.me",
       "Expires: 2027-12-31T00:00:00.000Z",
       "Preferred-Languages: en",
       "",

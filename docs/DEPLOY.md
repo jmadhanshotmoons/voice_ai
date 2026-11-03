@@ -1,4 +1,4 @@
-# Deploying VoiceAI
+# Deploying Batkarai
 
 | Part | Where | Config |
 |---|---|---|

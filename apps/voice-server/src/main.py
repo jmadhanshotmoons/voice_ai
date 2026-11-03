@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 
 
 # No public API docs / schema: nothing to enumerate
-app = FastAPI(title="VoiceAI Pipeline Server", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Batkarai Pipeline Server", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("FRONTEND_URL", "http://localhost:3001").split(",") if o.strip()]
 
