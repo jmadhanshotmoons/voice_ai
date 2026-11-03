@@ -20,8 +20,8 @@ from src.models.schemas import AgentConfig
 
 logger = structlog.get_logger()
 
-# Mirrors the rates the API's status callback has always used (Rs per minute).
-RATE_PER_MIN = {"premium": 5.5, "standard": 3.6}
+# Rs per connected minute. Must match RATES in apps/api/src/types/index.ts and the price shown on the site.
+RATE_PER_MIN = {"premium": 6.8, "standard": 5.0}
 
 DB_DEFAULT_GREETING = "Namaste! Main aapki kaise madad kar sakti hoon?"
 

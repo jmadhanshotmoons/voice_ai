@@ -9,6 +9,7 @@
  *   this route only bills a call the voice server never saw.
  */
 
+import { RATES } from "../types";
 import { Router, Request, Response, NextFunction } from "express";
 import { createClient } from "@supabase/supabase-js";
 import { verifyCall, twilioStreamTwiml, verifyTwilioSignature } from "../lib/telephony";
@@ -136,7 +137,7 @@ router.post("/status/:callId", requireCallToken, async (req: Request, res: Respo
       .eq("id", call.employee_id)
       .single();
 
-    const rate = employee?.voice_tier === "premium" ? 5.5 : 3.6;
+    const rate = employee?.voice_tier === "premium" ? RATES.premium_per_min : RATES.standard_per_min;
     const credits = Math.round(Math.max(1, Math.ceil(duration / 30)) * 0.5 * rate * 100) / 100;
 
     await supabase.rpc("deduct_credits", {

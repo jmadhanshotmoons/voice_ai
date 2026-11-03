@@ -84,18 +84,20 @@ export interface CreditTransaction {
 
 // Billing rates in INR
 export const RATES = {
-  standard_per_min: 3.6,
-  premium_per_min: 5.5,
+  standard_per_min: 5,
+  premium_per_min: 6.8,
   ai_per_use: 0.2,
   number_monthly: 649,
   sandbox_per_msg: 0.2,
   gst_pct: 18,
 } as const;
 
+// Small first top-up so anyone can start; bonus credits grow with the pack. Keep in sync with the billing page.
 export const CREDIT_PACKS = [
-  { amount: 1499, bonus: 0, label: "Starter" },
-  { amount: 2999, bonus: 100, label: "Basic" },
-  { amount: 9999, bonus: 500, label: "Growth" },
-  { amount: 24999, bonus: 1650, label: "Scale" },
-  { amount: 50000, bonus: 4000, label: "Pro" },
+  { amount: 499, bonus: 0, label: "Trial" },
+  { amount: 999, bonus: 50, label: "Starter" },
+  { amount: 2499, bonus: 150, label: "Basic" },
+  { amount: 9999, bonus: 800, label: "Growth" },
+  { amount: 24999, bonus: 2500, label: "Scale" },
+  { amount: 50000, bonus: 6000, label: "Pro" },
 ] as const;
