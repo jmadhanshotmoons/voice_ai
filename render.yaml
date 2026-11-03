@@ -1,0 +1,97 @@
+# Render Blueprint: the backend (API + voice server + Redis).
+# Render dashboard -> New -> Blueprint -> pick this repo. Then fill in every
+# variable marked "sync: false" (secrets are never stored in git).
+#
+# Region: singapore is Render's closest region to India.
+# Plan: "starter" keeps the services always on. Free web services sleep after
+# 15 minutes idle, which would drop incoming phone calls.
+
+envVarGroups:
+  - name: voiceai-shared
+    envVars:
+      # Signs call callbacks. Generated once, shared by the API and voice server.
+      - key: WEBHOOK_SECRET
+        generateValue: true
+
+services:
+  - type: web
+    name: voiceai-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    region: singapore
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: voiceai-shared
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: voiceai-redis
+          property: connectionString
+      # Public addresses (change these if Render gives the services different names)
+      - key: PUBLIC_API_URL
+        value: https://voiceai-api.onrender.com
+      - key: PUBLIC_VOICE_URL
+        value: https://voiceai-voice.onrender.com
+      - key: FRONTEND_URL
+        sync: false          # your Vercel URL, e.g. https://voiceai.vercel.app
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: TELEPHONY_PROVIDER
+        value: twilio        # mock | twilio | exotel
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+
+  - type: web
+    name: voiceai-voice
+    runtime: docker
+    dockerfilePath: ./apps/voice-server/Dockerfile
+    dockerContext: ./apps/voice-server
+    region: singapore
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: voiceai-shared
+      - key: PORT
+        value: "8765"
+      - key: AWS_REGION
+        value: ap-south-1
+      - key: AWS_BEDROCK_MODEL_ID
+        value: in.anthropic.claude-haiku-4-5-20251001-v1:0
+      - key: FRONTEND_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: CARTESIA_API_KEY
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
+  - type: keyvalue
+    name: voiceai-redis
+    region: singapore
+    plan: starter
+    ipAllowList: []          # internal connections only

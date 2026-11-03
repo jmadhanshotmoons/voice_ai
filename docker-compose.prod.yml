@@ -1,0 +1,72 @@
+# Production deployment -- all 3 services + Redis
+
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  voice-server:
+    build: ./apps/voice-server
+    restart: always
+    ports:
+      - "8765:8765"
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  api:
+    build: ./apps/api
+    restart: always
+    ports:
+      - "3001:3001"
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - NODE_ENV=production
+      - VOICE_SERVER_URL=ws://voice-server:8765
+    depends_on:
+      redis:
+        condition: service_healthy
+      voice-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build: ./apps/web
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://api.yourdomain.com
+      - NEXT_PUBLIC_VOICE_SERVER_URL=wss://voice.yourdomain.com
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  redis_data:

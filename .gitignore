@@ -1,0 +1,27 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.pyc
+*.pyo
+dist/
+.next/
+venv/
+*.egg-info/
+.DS_Store
+Thumbs.db
+*.wav
+*.mp3
+*.log
+.vercel/
+.turbo/
+coverage/
+
+# local Supabase runtime + tooling
+supabase/.temp/
+supabase/.branches/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+.claude/
