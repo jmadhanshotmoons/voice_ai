@@ -64,7 +64,8 @@ export const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY || ""
 );
 
-export const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+// Redis is optional: only connect when REDIS_URL is set (avoids endless reconnect errors without it)
+export const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 
 // ── Health (unauthenticated) ──
 app.get("/health", (_req, res) => {
