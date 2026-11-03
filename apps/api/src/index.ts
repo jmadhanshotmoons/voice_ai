@@ -38,6 +38,7 @@ import leadRoutes from "./routes/leads";
 import numberRoutes from "./routes/numbers";
 import telephonyWebhookRoutes from "./routes/telephony-webhooks";
 import accountRoutes from "./routes/account";
+import newsletterRoutes from "./routes/newsletter";
 
 const app = express();
 // Behind one reverse proxy (Render / Cloudflare tunnel): use the real client IP for rate limits
@@ -96,6 +97,7 @@ app.use("/api/v1/account", requireAuth, accountRoutes);
 // ── Public Routes (API-key or webhook auth) ──
 app.use("/api/v1/lead-intake", leadIntakeRoutes);
 app.use("/api/v1/telephony", telephonyWebhookRoutes);
+app.use("/api/v1/newsletter", newsletterRoutes);
 
 // ── 404 catch-all (don't leak route info) ──
 app.use((_req, res) => {
