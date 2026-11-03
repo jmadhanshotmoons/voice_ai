@@ -44,6 +44,11 @@ const outboundSchema = z.object({
 
 // POST /api/v1/calls/outbound -- ring a phone with an AI employee
 router.post("/outbound", outboundLimiter, validate(outboundSchema), async (req: Request, res: Response) => {
+  // The mock provider only exists for local testing. On a live server it would claim "ringing" without dialling anyone.
+  if (provider() === "mock" && process.env.NODE_ENV === "production") {
+    return res.status(503).json({ error: "Phone calling is not set up on the server yet. Ask the administrator to add the Twilio settings." });
+  }
+
   const phone = normalizePhone(req.body.phone_number);
   if (!phone) return res.status(400).json({ error: "Enter a valid phone number, e.g. 98765 43210" });
   if (!allowedPrefixes().some((p) => phone.startsWith(p))) {
