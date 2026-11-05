@@ -32,7 +32,7 @@ const createEmployeeSchema = z.object({
   capture_fields: z.array(z.string().max(50)).max(20).default(["name", "interest"]),
   mode: z.enum(["instant", "bulk", "inbound"]).default("instant"),
   tools_enabled: z.array(z.string()).default(["capture_field"]),
-  max_call_duration_s: z.number().min(30).max(600).default(300),
+  max_call_duration_s: z.number().int().min(30).max(1800).default(300),
 });
 
 const updateEmployeeSchema = createEmployeeSchema.partial();

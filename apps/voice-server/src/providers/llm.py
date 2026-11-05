@@ -77,6 +77,18 @@ TOOLS = [
         },
     },
     {
+        "name": "end_call",
+        "description": (
+            "Hang up after your goodbye. Call it in the SAME reply as a short spoken goodbye when the caller says bye/thanks, "
+            "is busy or not interested, asks you to stop, or the conversation goal is finished."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"reason": {"type": "string", "description": "busy, not_interested, goodbye, goal_done"}},
+            "required": ["reason"],
+        },
+    },
+    {
         "name": "transfer_to_human",
         "description": "Transfer call to a human when caller asks or you cannot help.",
         "input_schema": {

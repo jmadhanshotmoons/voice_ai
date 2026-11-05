@@ -60,13 +60,34 @@ FILLERS = {
     "en-IN": ["Right.", "I see.", "Sure."],
 }
 
+# Spoken when the call-length limit is reached (native script so the voice pronounces it correctly)
+CLOSINGS = {
+    "te-IN": "మీ సమయానికి ధన్యవాదాలండి, శుభదినం!",
+    "hi-IN": "आपके समय के लिए धन्यवाद, आपका दिन शुभ हो!",
+    "ta-IN": "உங்கள் நேரத்திற்கு நன்றி, நல்ல நாளாக அமையட்டும்!",
+    "kn-IN": "ನಿಮ್ಮ ಸಮಯಕ್ಕೆ ಧನ್ಯವಾದಗಳು, ಶುಭದಿನ!",
+    "ml-IN": "നിങ്ങളുടെ സമയത്തിന് നന്ദി, നല്ലൊരു ദിവസം ആശംസിക്കുന്നു!",
+    "mr-IN": "आपल्या वेळेबद्दल धन्यवाद, तुमचा दिवस शुभ जावो!",
+    "en-IN": "Thank you for your time. Have a great day!",
+}
+
+# A short caller line that is just a goodbye ends the call even if the model forgets to hang up.
+_GOODBYE = re.compile(
+    r"\b(bye|good ?bye|tata|talk (to you )?later|call (me )?later|not interested|i'?m busy|am busy)\b"
+    r"|బై|వస్తాను|ఉంటాను|బిజీ|बाय|अलविदा|रखता हूँ|रखती हूँ|रखता हूं|रखती हूं|बिज़ी|व्यस्त|बाद में|பை|பிஸி|ಬೈ|ಬ್ಯುಸಿ|ബൈ|ബിസി|बिझी",
+    re.IGNORECASE,
+)
+_QUESTION = re.compile(r"[^.?!।\n]+\?")
+
 # Turn-taking knobs
 SILENCE_END_MS = 400        # quiet needed to decide the caller has finished
 MIN_SPEECH_MS = 270         # speech needed to count as the caller talking (also gates barge-in)
 KEEP_TRAILING_SILENCE_MS = 150
 PREROLL_FRAMES = 16         # 480 ms of audio kept from before speech was detected
 MIN_UTTERANCE_MS = 300      # ignore blips shorter than this
-FILLER_AFTER_S = 1.5        # play an acknowledgement if no reply audio by then
+FILLER_AFTER_S = 1.0        # play an acknowledgement if no reply audio by then
+HISTORY_MESSAGES = 40       # recent turns sent to the model (older ones live on in the "already asked" list)
+WRAP_UP_S = 40              # tell the model to finish up this long before the limit
 SAMPLE_RATE = 16000
 BYTES_PER_MS = SAMPLE_RATE * 2 // 1000
 
@@ -139,6 +160,8 @@ class CallSession:
         self._turn_end_t = 0.0
         self._reply_started = False
         self._spoken: list[str] = []
+        self._ending = False                              # the call should hang up once the goodbye has played
+        self._hangup_task: Optional[asyncio.Task] = None
 
         # Wall-clock time the caller's device finishes playing queued agent audio.
         # TTS is sent faster than realtime, so barge-in is judged against this.
@@ -163,7 +186,7 @@ class CallSession:
         try:
             while self.state.is_active:
                 if time.time() - self.state.started_at > self.agent.max_call_duration_s:
-                    await self._speak("I need to wrap up now. Thank you for your time!")
+                    await self._speak(CLOSINGS.get(self.agent.language, CLOSINGS["en-IN"]))
                     await asyncio.sleep(max(0.0, self._speaking_until - time.time()))
                     break
 
@@ -181,7 +204,7 @@ class CallSession:
         except Exception as e:
             logger.error("session_error", call_id=self.call_id, error=str(e))
         finally:
-            for t in (self._speak_task, self._turn_task, self._filler_task, self._fillers_task):
+            for t in (self._speak_task, self._turn_task, self._filler_task, self._fillers_task, self._hangup_task):
                 if t:
                     t.cancel()
             self.state.is_active = False
@@ -235,9 +258,10 @@ class CallSession:
     async def _barge_in(self):
         """Caller spoke over the agent: stop talking right now."""
         logger.debug("barge_in", call_id=self.call_id)
-        for t in (self._speak_task, self._turn_task, self._filler_task):
+        for t in (self._speak_task, self._turn_task, self._filler_task, self._hangup_task):
             if t:
                 t.cancel()
+        self._ending = False  # the caller is still engaged, so the goodbye is off
         self._speaking_until = 0.0
         await self.ws.send_json({"type": "clear"})
         self.speech_buffer.clear()
@@ -279,13 +303,18 @@ class CallSession:
 
         self._spoken = []
         self._marks = marks
+        if len(text.split()) <= 8 and _GOODBYE.search(text):
+            self._ending = True
         try:
-            messages = [self._build_system_message()] + self.state.conversation[-20:]
+            messages = [self._build_system_message()] + self.state.conversation[-HISTORY_MESSAGES:]
             tools = await self._stream_and_speak(messages, tools_enabled=True)
             if not self._spoken and tools:
                 # The model only called a tool: ask it again, with no tools, for the spoken reply
-                followup = messages + [ConversationMessage(role="user", content="[Tool result: ok]")]
+                note = "[Call is ending. Say one short goodbye sentence now.]" if self._ending else "[Tool result: ok]"
+                followup = messages + [ConversationMessage(role="user", content=note)]
                 await self._stream_and_speak(followup, tools_enabled=False)
+            if self._ending:
+                self._hangup_task = asyncio.create_task(self._hang_up_after_goodbye())
         finally:
             # Runs on normal end and on cancellation (barge-in): remember what was actually said
             if self._filler_task:
@@ -366,6 +395,13 @@ class CallSession:
         self._speaking_until = max(self._speaking_until, time.time()) + len(chunk) / 48000
         await self.ws.send_json({"type": "audio", "data": pcm16_to_b64(chunk)})
 
+    async def _hang_up_after_goodbye(self):
+        """Let the goodbye finish playing on the caller's phone, then end the call."""
+        await asyncio.sleep(max(0.0, self._speaking_until - time.time()) + 0.6)
+        logger.info("call_ended_by_agent", call_id=self.call_id)
+        # The main loop sees this on the next audio frame, finishes the record and returns; closing the socket drops the phone line.
+        self.state.is_active = False
+
     # ───────────────────────── acknowledgements ─────────────────────────
 
     async def _prepare_fillers(self):
@@ -428,18 +464,28 @@ class CallSession:
     def _build_system_message(self) -> ConversationMessage:
         enhance = build_enhance_prompt(self.agent.language)
         lang_name = LANGUAGE_NAMES.get(self.agent.language, self.agent.language)
+        asked = self._already_asked()
+        limit = int(self.agent.max_call_duration_s)
+        elapsed = int(time.time() - self.state.started_at)
+        wrap = (
+            " TIME IS ALMOST UP: confirm the next step, say a short goodbye and call end_call in this reply."
+            if limit - elapsed <= WRAP_UP_S
+            else ""
+        )
         prompt = f"""You are {self.agent.name}, a voice assistant on a live phone call on behalf of {self.agent.company}.
 
 HOW TO TALK (this is a real-time phone conversation, not a chat):
 1. Respond to what the caller JUST said. Open with a very short reaction of 1-3 words that ends with "!" or "." (for example a quick "Great!" or "Understood."), then give the real answer. If they asked a question, answer it. Never ignore their question or statement.
 2. Keep every reply to 1-2 short sentences (about 20 words). Say ONE thing, then stop or ask one short question. Plain spoken words only: no emojis, no markdown, no lists.
 3. The caller's words come from speech recognition and can contain mistakes. If their message does not make sense in context, say politely that you did not catch it and ask them to repeat. Do not guess.
-4. Use the caller's details exactly as they said them (day, time, numbers, names). Never contradict or change them. Never ask the same question twice in a row. If they did not answer it, rephrase once, or move on to something else.
+4. Use the caller's details exactly as they said them (day, time, numbers, names). Never contradict or change them.
 5. Vary how you start your replies. Do not begin every reply with "yes" or "okay": a short acknowledgement may already have been played.
 6. Sound like a warm, natural person: simple everyday words, match the caller's tone and pace.
-7. If the caller wants to end the call, or says they are not interested, thank them and say goodbye. Do not keep pushing.
-8. LANGUAGE: Reply ONLY in {lang_name}, written in its native script so the voice pronounces it correctly. Do not switch to Hindi or English unless the caller does, or the language is English. Common English business words may stay in English.
-9. Use respectful forms of address. Repeat back phone numbers, dates and amounts to confirm. If unsure of something, offer to have someone call back. Do not volunteer that you are an AI unless asked directly.
+7. ENDING THE CALL: if the caller says bye or thanks-and-bye, says they are busy or it is not a good time, is not interested, or asks you to stop, reply with ONE short warm goodbye (offer a call back later if they are busy) and call end_call in that same reply. Never ask another question after that and never try to keep them on the line. Do the same when the goal is done and every needed detail is confirmed.
+8. NEVER REPEAT YOURSELF: every question you have already asked is listed under "Already asked" below. Do not ask any of them again, in any wording, even if the answer was short or unclear: accept it and move on. If one answer truly could not be understood, you may check it once, then drop it. Never re-ask for something listed under "Captured so far" or that the caller has already told you. Ask at most one question per reply, and only questions that move the goal forward.
+9. The moment the caller states a value for a field you must capture, call capture_field for it in that same reply, then move on to the next missing item.
+10. LANGUAGE: Reply ONLY in {lang_name}, written in its native script so the voice pronounces it correctly. Do not switch to Hindi or English unless the caller does, or the language is English. Common English business words may stay in English.
+11. Use respectful forms of address. Repeat back phone numbers, dates and amounts to confirm. If unsure of something, offer to have someone call back. Do not volunteer that you are an AI unless asked directly.
 
 YOUR TASK (follow this scenario, stay in character, and steer the conversation toward its goal):
 {self.agent.system_prompt}
@@ -449,11 +495,22 @@ KNOWLEDGE:
 
 CAPTURE THESE FIELDS: {', '.join(self.agent.capture_fields)}
 (Call capture_field only after the caller has actually stated the value. Never save placeholders or guesses.)
-Captured so far: {json.dumps(self.state.captured_fields) or 'None'}
+Captured so far: {json.dumps(self.state.captured_fields, ensure_ascii=False) if self.state.captured_fields else 'None'}
 
-Turn {self.state.turn_count} | Call duration: {int(time.time() - self.state.started_at)}s
+Already asked (do not ask again):
+{asked}
+
+Turn {self.state.turn_count} | Call time used: {elapsed}s of {limit}s.{wrap}
 {enhance}"""
         return ConversationMessage(role="system", content=prompt)
+
+    def _already_asked(self) -> str:
+        """Every question the agent has put to the caller so far, so a long call never circles back."""
+        questions: list[str] = []
+        for m in self.state.conversation:
+            if m.role == "assistant":
+                questions += [q.strip() for q in _QUESTION.findall(m.content) if len(q.strip()) > 3]
+        return "\n".join(f"- {q[:140]}" for q in questions[-15:]) or "- (nothing yet)"
 
     async def _execute_tool(self, tool_call: dict) -> dict:
         name = tool_call["name"]
@@ -469,6 +526,9 @@ Turn {self.state.turn_count} | Call duration: {int(time.time() - self.state.star
             return {"ok": True, "msg": f"Booked {args.get('date')} at {args.get('time')}"}
         elif name == "send_whatsapp":
             return {"ok": True, "msg": "WhatsApp sent"}
+        elif name == "end_call":
+            self._ending = True
+            return {"ok": True}
         elif name == "transfer_to_human":
             return {"ok": True, "msg": "Transferring"}
         return {"ok": False, "msg": f"Unknown tool: {name}"}
@@ -482,23 +542,49 @@ Turn {self.state.turn_count} | Call duration: {int(time.time() - self.state.star
                 f"{'Caller' if t['role']=='user' else 'Agent'}: {t['text']}"
                 for t in self.state.transcript
             )
-            resp = await self.llm.generate(
-                [
-                    ConversationMessage(
-                        role="system",
-                        content="Summarize this call in 2-3 sentences. Include: topic, outcome, next steps.",
+            captured = json.dumps(self.state.captured_fields, ensure_ascii=False) if self.state.captured_fields else "none"
+            try:
+                resp = await asyncio.wait_for(
+                    self.llm.generate(
+                        [
+                            ConversationMessage(
+                                role="system",
+                                content=(
+                                    "You write the final overview of a finished phone call between an AI agent and a caller. "
+                                    "Write in English, whatever language the call was in. Cover the WHOLE conversation from start to end, "
+                                    "in 4-6 short plain sentences: why the call happened, what the caller said and wanted (budget, timing, "
+                                    "preferences, objections), how the call ended (interested, busy, not interested, goodbye), and the "
+                                    "agreed next step. Use only facts from the transcript. No bullet points, no headings."
+                                ),
+                            ),
+                            ConversationMessage(
+                                role="user",
+                                content=f"Details captured during the call: {captured}\n\nTranscript:\n{text}",
+                            ),
+                        ],
+                        tools_enabled=False,
+                        max_tokens=400,
                     ),
-                    ConversationMessage(role="user", content=text),
-                ],
-                tools_enabled=False,
-            )
-            summary = resp.text
+                    timeout=25,
+                )
+                if resp.finish_reason != "error":
+                    summary = resp.text.strip()
+            except Exception as e:
+                logger.error("summary_failed", call_id=self.call_id, error=str(e))
+            if not summary:
+                # Never lose the record: fall back to a plain account of the call
+                n = sum(1 for t in self.state.transcript if t["role"] == "user")
+                summary = f"The call lasted {round(self.state.duration_s)} seconds with {n} replies from the caller. Details captured: {captured}."
+            self.summary = summary
+        else:
+            summary = "The call ended before any conversation took place."
             self.summary = summary
 
         try:
             await self.ws.send_json(
                 {
                     "type": "call_ended",
+                    "call_id": self.call_id,
                     "duration_s": round(self.state.duration_s),
                     "turns": self.state.turn_count,
                     "captured": self.state.captured_fields,
